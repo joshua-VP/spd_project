@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+venv/
+env/
+.env/
+
+# YOLO model weights (large files — download separately)
+models/*.pt
+
+# Stub cache files (regenerated at runtime)
+stubs/*.pkl
+
+# Video files (too large for git)
+input_videos/*.mp4
+input_videos/*.avi
+output_videos/*.avi
+output_videos/*.mp4
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Jupyter
+.ipynb_checkpoints/
