@@ -16,12 +16,18 @@ from trackers import Tracker
 from team_assigner import TeamAssigner
 from player_ball_assigner import PlayerBallAssigner
 from camera_movement_estimator import CameraMovementEstimator
+import cv2
 import numpy as np
 
 
 def main():
     # ── 1. Read Video ───────────────────────────────────────────────────
-    video_frames = read_video("input_videos/input_video.mp4")
+    video_path = "input_videos/input_video.mp4"
+    cap = cv2.VideoCapture(video_path)
+    fps = cap.get(cv2.CAP_PROP_FPS) or 29.97
+    cap.release()
+
+    video_frames = read_video(video_path)
 
     # ── 2. Initialize Tracker & Get Object Tracks ───────────────────────
     tracker = Tracker("models/best.pt")
@@ -48,13 +54,25 @@ def main():
         tracks, camera_movement_per_frame
     )
 
+    # Stabilize player tracklets: stitch broken tracks across occlusions & prune transient noise
+    tracker.stitch_and_stabilize_tracks(tracks, camera_movement_per_frame)
+
     # ── 4. Interpolate Ball Positions ───────────────────────────────────
     tracks["ball"] = tracker.interpolate_ball_positions(tracks["ball"])
 
     # ── 5. Team Assignment (K-Means on Jersey Colors) ───────────────────
     team_assigner = TeamAssigner()
+    # Find a representative frame with multiple players to fit two team jersey clusters
+    ref_frame_idx = 0
+    for idx, p_track in enumerate(tracks["players"]):
+        if len(p_track) >= 6:
+            ref_frame_idx = idx
+            break
+        elif len(p_track) >= 2:
+            ref_frame_idx = idx
+
     team_assigner.assign_team_color(
-        video_frames[0], tracks["players"][0]
+        video_frames[ref_frame_idx], tracks["players"][ref_frame_idx]
     )
 
     for frame_num, player_track in enumerate(tracks["players"]):
@@ -92,10 +110,10 @@ def main():
 
     # ── 7. Draw Annotations & Save Output Video ────────────────────────
     output_video_frames = tracker.draw_annotations(
-        video_frames, tracks, team_ball_control
+        video_frames, tracks, team_ball_control, draw_mode="bbox"
     )
 
-    save_video(output_video_frames, "output_videos/output_video.avi")
+    save_video(output_video_frames, "output_videos/output_video.avi", fps=fps)
 
     print("Pipeline complete. Output saved to output_videos/output_video.avi")
 

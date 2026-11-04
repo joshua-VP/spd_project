@@ -13,6 +13,11 @@ venv/
 env/
 .env/
 
+# Environment variables & secrets
+.env
+.env.*
+!.env.example
+
 # YOLO model weights (large files — download separately)
 models/*.pt
 
@@ -22,6 +27,7 @@ stubs/*.pkl
 # Video files (too large for git)
 input_videos/*.mp4
 input_videos/*.avi
+input_videos/*.webm
 output_videos/*.avi
 output_videos/*.mp4
 
@@ -37,3 +43,9 @@ Thumbs.db
 
 # Jupyter
 .ipynb_checkpoints/
+
+# Training runs
+runs/
+runs_football/
+football_detection/
+
