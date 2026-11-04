@@ -32,7 +32,8 @@ class Tracker:
         Args:
             model_path (str): Path to YOLO weights file (e.g., 'models/best.pt').
         """
-        self.model = YOLO(model_path)
+        self.model_path = model_path
+        self.model = YOLO(model_path) if model_path and os.path.exists(model_path) else None
         self.tracker = sv.ByteTrack()
 
     def add_position_to_tracks(self, tracks):
@@ -102,6 +103,12 @@ class Tracker:
         Returns:
             list: List of YOLO detection results, one per frame.
         """
+        if self.model is None:
+            raise FileNotFoundError(
+                f"YOLO model weights file not found at '{self.model_path}'. "
+                "Please train the model or ensure read_from_stub=True with a valid stub file."
+            )
+
         batch_size = 20
         detections = []
         for i in range(0, len(frames), batch_size):
