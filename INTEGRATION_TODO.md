@@ -19,14 +19,44 @@
   for footage at non-24-fps frame rates (e.g. 25 fps broadcast, 50 fps slow-mo).
   *(utils/video_utils.py, `get_video_fps` docstring)*
 
-- [ ] **[dev_run.py]** The stub-loading, CONTRACT invariant checks, and plain
-  bounding-box annotation logic in `dev_run.py` should migrate into `main.py`
-  at integration time.  `dev_run.py` can then become a pure CI smoke test.
+- [ ] **[dev_run.py]** The stub-loading, CONTRACT invariant checks, and annotation
+  logic in `dev_run.py` should migrate into `main.py` at integration time.
+  `dev_run.py` can then be removed or repurposed as a pure CI smoke test.
   *(dev_run.py top-of-file docstring)*
+
+- [ ] **[annotations/annotator.py — speed/distance telemetry]** Confirm key names
+  and units (`"speed"` in km/h, `"distance"` in metres) with Person A, and confirm
+  Person A is not also drawing them in `trackers/tracker.py` so there are no duplicate
+  overlays at integration time. *(annotations/annotator.py)*
 
 ---
 
 ## Known Integration Items (not yet in source code)
+
+- [ ] **`main.py` must call `Annotator.draw_annotations` for all drawing.**
+  At integration, replace `Tracker.draw_annotations` with `Annotator().draw_annotations`
+  in `main.py`. The `Annotator` reads `team_color`, `has_ball`, `speed`, and `distance`
+  directly from the tracks dict.
+
+- [ ] **Person A's drawing code duplicates `annotations/annotator.py`.**
+  Person A's code in `trackers/tracker.py`, `demo_person_a.py`, and
+  `run_person_a_on_real_video.py` contains redundant drawing logic (`draw_bbox`,
+  `draw_ellipse`, `draw_triangle`, `draw_team_ball_control`, `draw_person_a_visuals`).
+  At integration, his drawing code is removed or bypassed in favor of `annotations/annotator.py`.
+
+- [ ] **Confirm speed/distance key names, units, and who draws them.**
+  Confirm Person A's speed and distance module outputs `"speed"` (km/h) and
+  `"distance"` (metres) in the tracks dict, and that Person A does not attempt to draw
+  them in his tracker.
+
+- [ ] **`main.py` and `run_person_a_on_real_video.py` FPS handling.**
+  `main.py` and `run_person_a_on_real_video.py` pass `fps=fps`. Confirm that this value
+  comes from `get_video_fps(video_path)`, not a hardcoded number.
+
+- [ ] **`test_person_a.py` location.**
+  `test_person_a.py` is currently in the repo root, so pytest (`testpaths: tests` in `pytest.ini`)
+  never runs it. Person A should move it into `tests/test_person_a.py` and update imports so it
+  participates in automated test runs.
 
 - [ ] **Confirm CONTRACT format of A's real stub.**
   When `stubs/tracks_stub.pkl` lands, verify:
@@ -35,24 +65,13 @@
   - Ball is always `{1: {"bbox": [...]}}` (integer key `1`, not string `"1"`).
   - Every `bbox` is a **plain Python `list[float]`** (call `.tolist()` on numpy arrays).
 
-- [ ] **Remove duplicate interpolation / drawing from `trackers/tracker.py`.**
-  `Tracker` already contains:
-  - `interpolate_ball_positions()` — pandas linear interp + bfill.
-  - `draw_ellipse()`, `draw_triangle()`, `draw_team_ball_control()`, `draw_annotations()`.
-  If Person B adds any of these capabilities independently (e.g. for the dummy pipeline),
-  they must be removed or delegated to `Tracker` at integration time to avoid duplicate logic.
-
 - [ ] **Confirm goalkeeper merge.**
   `Tracker.get_object_tracks()` overrides goalkeeper class ID → player class ID before
-  ByteTrack runs (line 161–164 in `trackers/tracker.py`).  Confirm with Person A that:
+  ByteTrack runs. Confirm with Person A that:
   - After the override, goalkeeper track IDs appear inside `tracks["players"]`, not in a
     separate key.
   - The ground-truth GK IDs from `stubs/dummy_ground_truth.pkl` (`gk_ids = [1, 12]`)
     should be replaced with the **real ByteTrack IDs** once A's stub is used.
-
-- [ ] **A's speed estimator should use `get_video_fps`.**
-  (Duplicate of A-PUSH item above — listed here for visibility in the integration checklist.)
-  `utils.get_video_fps(path)` returns `24.0` as a safe fallback if OpenCV reports 0.
 
 - [ ] **Homography / `position_transformed` key.**
   Once Person A's `ViewTransformer` / homography module lands, confirm it writes
@@ -68,7 +87,6 @@
   `utils.measure_xy_distance(p1, p2)` has been added to `utils/bbox_utils.py` and
   exported from `utils/__init__.py`.  Person A's camera estimator currently computes
   dx/dy inline — consider switching to `measure_xy_distance` for consistency.
-  *(camera_movement_estimator.py lines 156–161)*
 
 ---
 
@@ -79,4 +97,3 @@
 ---
 
 *Last updated: 2026-11-04 by Person B*
-

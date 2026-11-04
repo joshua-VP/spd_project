@@ -89,7 +89,7 @@ must not modify the other's.
 | Key | Type | Written when | Description |
 |-----|------|-------------|-------------|
 | `"team"` | `int` | After `TeamAssigner.get_player_team()` | `1` or `2`; only for `"players"`. |
-| `"team_color"` | `tuple/np.ndarray` | After team assignment | BGR colour of the team (for rendering ellipses). |
+| `"team_color"` | `tuple[int, int, int]` | After team assignment | BGR colour of the team (for rendering ellipses). "team_color" is a BGR tuple of three ints (frames are read by OpenCV, so the K-Means centres in Part 3 will also be BGR). |
 | `"has_ball"` | `bool` | After `PlayerBallAssigner` | `True` if this player currently has possession. |
 
 > [!IMPORTANT]
