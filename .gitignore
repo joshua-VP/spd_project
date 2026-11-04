@@ -13,6 +13,11 @@ venv/
 env/
 .env/
 
+# Environment variables & secrets
+.env
+.env.*
+!.env.example
+
 # YOLO model weights (large files — download separately)
 models/*.pt
 
