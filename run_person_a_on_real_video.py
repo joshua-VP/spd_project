@@ -22,10 +22,10 @@ from trackers import Tracker
 from camera_movement_estimator import CameraMovementEstimator
 
 
-def draw_person_a_visuals(tracker, frames, tracks, camera_movement):
+def draw_person_a_visuals(tracker, frames, tracks, camera_movement, draw_mode="bbox"):
     """
     Render Person A visual annotations:
-    - Ground ellipses for players and referees with persistent ByteTrack IDs
+    - Bounding boxes with persistent ByteTrack ID badges (or foot ellipses)
     - Green triangle tracking the football
     - Telemetry HUD showing real-time camera panning vectors (dx, dy)
     """
@@ -34,19 +34,25 @@ def draw_person_a_visuals(tracker, frames, tracks, camera_movement):
     for frame_idx, frame in enumerate(frames):
         canvas = frame
 
-        # 1. Draw Player Foot Ellipses & IDs
+        # 1. Draw Players
         player_dict = tracks["players"][frame_idx]
         for track_id, p_info in player_dict.items():
             bbox = p_info["bbox"]
             color = (255, 200, 0)
-            canvas = tracker.draw_ellipse(canvas, bbox, color, track_id)
+            if draw_mode in ("bbox", "both"):
+                canvas = tracker.draw_bbox(canvas, bbox, color, track_id)
+            if draw_mode in ("ellipse", "both"):
+                canvas = tracker.draw_ellipse(canvas, bbox, color, track_id)
 
         # 2. Draw Referees
         ref_dict = tracks["referees"][frame_idx]
         for track_id, r_info in ref_dict.items():
             bbox = r_info["bbox"]
             color = (0, 255, 255)
-            canvas = tracker.draw_ellipse(canvas, bbox, color)
+            if draw_mode in ("bbox", "both"):
+                canvas = tracker.draw_bbox(canvas, bbox, color)
+            if draw_mode in ("ellipse", "both"):
+                canvas = tracker.draw_ellipse(canvas, bbox, color)
 
         # 3. Draw Ball Tracker Triangle
         ball_dict = tracks["ball"][frame_idx]
@@ -155,13 +161,19 @@ def main():
     print("\n4. Neutralizing camera panning from player ground coordinates...")
     camera_estimator.add_adjust_positions_to_tracks(tracks, camera_movement)
 
+    # Stabilize player tracklets: stitch broken tracks across occlusions & prune transient noise
+    print("   Stabilizing player tracklets with camera-compensated stitching...")
+    tracker.stitch_and_stabilize_tracks(tracks, camera_movement)
+
     # 5. Interpolate ball trajectory
     print("5. Interpolating ball trajectory across occluded frames...")
     tracks["ball"] = tracker.interpolate_ball_positions(tracks["ball"])
 
     # 6. Render visual video
-    print("\n6. Rendering tracking ellipses, ball markers, and HUD overlay...")
-    annotated_frames = draw_person_a_visuals(tracker, frames, tracks, camera_movement)
+    print("\n6. Rendering player bounding boxes, ball markers, and HUD overlay...")
+    annotated_frames = draw_person_a_visuals(
+        tracker, frames, tracks, camera_movement, draw_mode="bbox"
+    )
 
     output_path = "output_videos/real_match_person_a.avi"
     os.makedirs("output_videos", exist_ok=True)

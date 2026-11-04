@@ -54,6 +54,9 @@ def main():
         tracks, camera_movement_per_frame
     )
 
+    # Stabilize player tracklets: stitch broken tracks across occlusions & prune transient noise
+    tracker.stitch_and_stabilize_tracks(tracks, camera_movement_per_frame)
+
     # ── 4. Interpolate Ball Positions ───────────────────────────────────
     tracks["ball"] = tracker.interpolate_ball_positions(tracks["ball"])
 
@@ -107,7 +110,7 @@ def main():
 
     # ── 7. Draw Annotations & Save Output Video ────────────────────────
     output_video_frames = tracker.draw_annotations(
-        video_frames, tracks, team_ball_control
+        video_frames, tracks, team_ball_control, draw_mode="bbox"
     )
 
     save_video(output_video_frames, "output_videos/output_video.avi", fps=fps)
