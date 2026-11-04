@@ -70,7 +70,12 @@ class Tracker:
         Returns:
             list[dict]: Ball positions with interpolated bounding boxes.
         """
-        ball_positions = [x.get(1, {}).get("bbox", []) for x in ball_positions]
+        ball_positions = [
+            x.get(1, {}).get("bbox", [np.nan, np.nan, np.nan, np.nan])
+            if len(x.get(1, {}).get("bbox", [])) == 4
+            else [np.nan, np.nan, np.nan, np.nan]
+            for x in ball_positions
+        ]
         df_ball_positions = pd.DataFrame(
             ball_positions, columns=["x1", "y1", "x2", "y2"]
         )
@@ -178,10 +183,14 @@ class Tracker:
                 cls_id = frame_detection[3]
                 track_id = frame_detection[4]
 
-                if cls_id == cls_names_inv["player"]:
+                if track_id is None:
+                    continue
+                track_id = int(track_id)
+
+                if cls_id == cls_names_inv.get("player"):
                     tracks["players"][frame_num][track_id] = {"bbox": bbox}
 
-                if cls_id == cls_names_inv["referee"]:
+                if cls_id == cls_names_inv.get("referee"):
                     tracks["referees"][frame_num][track_id] = {"bbox": bbox}
 
             # Handle ball separately (no track ID, use fixed ID=1)
@@ -189,11 +198,14 @@ class Tracker:
                 bbox = frame_detection[0].tolist()
                 cls_id = frame_detection[3]
 
-                if cls_id == cls_names_inv["ball"]:
+                if cls_id == cls_names_inv.get("ball"):
                     tracks["ball"][frame_num][1] = {"bbox": bbox}
 
         # Save tracks to stub for future fast loading
         if stub_path is not None:
+            stub_dir = os.path.dirname(stub_path)
+            if stub_dir:
+                os.makedirs(stub_dir, exist_ok=True)
             with open(stub_path, "wb") as f:
                 pickle.dump(tracks, f)
 

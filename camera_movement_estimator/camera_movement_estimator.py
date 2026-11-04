@@ -124,7 +124,7 @@ class CameraMovementEstimator:
             with open(stub_path, "rb") as f:
                 return pickle.load(f)
 
-        camera_movement = [[0, 0]] * len(frames)
+        camera_movement = [[0, 0] for _ in range(len(frames))]
 
         old_gray = cv2.cvtColor(frames[0], cv2.COLOR_BGR2GRAY)
         old_features = cv2.goodFeaturesToTrack(old_gray, **self.features)
@@ -132,40 +132,44 @@ class CameraMovementEstimator:
         for frame_num in range(1, len(frames)):
             frame_gray = cv2.cvtColor(frames[frame_num], cv2.COLOR_BGR2GRAY)
 
+            # Skip if no features were found in previous frame
+            if old_features is None or len(old_features) == 0:
+                old_gray = frame_gray.copy()
+                old_features = cv2.goodFeaturesToTrack(old_gray, **self.features)
+                continue
+
             # Calculate optical flow for existing feature points
             new_features, status, _ = cv2.calcOpticalFlowPyrLK(
                 old_gray, frame_gray, old_features, None, **self.lk_params
             )
 
-            max_distance = 0
-            camera_movement_x, camera_movement_y = 0, 0
-
             if new_features is not None:
+                diff_x_list = []
+                diff_y_list = []
+
                 for i, (new, old) in enumerate(
                     zip(new_features, old_features)
                 ):
                     if status[i]:
-                        new_features_point = new.ravel()
-                        old_features_point = old.ravel()
+                        new_point = new.ravel()
+                        old_point = old.ravel()
 
-                        distance = measure_distance(
-                            new_features_point, old_features_point
-                        )
-                        if distance > max_distance:
-                            max_distance = distance
-                            camera_movement_x = (
-                                new_features_point[0] - old_features_point[0]
-                            )
-                            camera_movement_y = (
-                                new_features_point[1] - old_features_point[1]
-                            )
+                        diff_x = new_point[0] - old_point[0]
+                        diff_y = new_point[1] - old_point[1]
+                        diff_x_list.append(diff_x)
+                        diff_y_list.append(diff_y)
 
-            # Filter out small movements as noise
-            if max_distance > self.minimum_distance:
-                camera_movement[frame_num] = [
-                    camera_movement_x,
-                    camera_movement_y,
-                ]
+                if len(diff_x_list) > 0:
+                    median_x = float(np.median(diff_x_list))
+                    median_y = float(np.median(diff_y_list))
+                    distance = np.sqrt(median_x**2 + median_y**2)
+
+                    # Filter out small movements as noise
+                    if distance > self.minimum_distance:
+                        camera_movement[frame_num] = [
+                            median_x,
+                            median_y,
+                        ]
 
             # Update for next iteration
             old_gray = frame_gray.copy()
@@ -173,6 +177,9 @@ class CameraMovementEstimator:
 
         # Save to stub for future fast loading
         if stub_path is not None:
+            stub_dir = os.path.dirname(stub_path)
+            if stub_dir:
+                os.makedirs(stub_dir, exist_ok=True)
             with open(stub_path, "wb") as f:
                 pickle.dump(camera_movement, f)
 
