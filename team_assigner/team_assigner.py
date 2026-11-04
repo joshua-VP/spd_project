@@ -97,6 +97,11 @@ class TeamAssigner:
             player_color = self.get_player_color(frame, bbox)
             player_colors.append(player_color)
 
+        if len(player_colors) < 2:
+            self.team_colors[1] = np.array([220, 50, 40])  # Blue default
+            self.team_colors[2] = np.array([40, 40, 220])  # Red default
+            return
+
         kmeans = KMeans(n_clusters=2, init="k-means++", n_init=10, random_state=0)
         kmeans.fit(player_colors)
 
@@ -122,6 +127,11 @@ class TeamAssigner:
         """
         if player_id in self.player_team_dict:
             return self.player_team_dict[player_id]
+
+        if self.kmeans is None:
+            team_id = (player_id % 2) + 1
+            self.player_team_dict[player_id] = team_id
+            return team_id
 
         player_color = self.get_player_color(frame, player_bbox)
 

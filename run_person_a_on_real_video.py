@@ -32,7 +32,7 @@ def draw_person_a_visuals(tracker, frames, tracks, camera_movement):
     output_frames = []
 
     for frame_idx, frame in enumerate(frames):
-        canvas = frame.copy()
+        canvas = frame
 
         # 1. Draw Player Foot Ellipses & IDs
         player_dict = tracks["players"][frame_idx]
@@ -114,8 +114,13 @@ def main():
 
     # 1. Read Video
     print(f"\n1. Loading video: {video_path}...")
+    cap = cv2.VideoCapture(video_path)
+    fps = cap.get(cv2.CAP_PROP_FPS) or 29.97
+    cap.release()
+
     frames = read_video(video_path)
-    print(f"   -> Loaded {len(frames)} frames ({frames[0].shape[1]}x{frames[0].shape[0]})")
+    duration = len(frames) / fps if fps > 0 else 0
+    print(f"   -> Loaded {len(frames)} frames ({frames[0].shape[1]}x{frames[0].shape[0]} @ {fps:.2f} FPS, {duration:.1f}s)")
 
     # 2. YOLO Detection & ByteTrack Persistent Tracking
     print("\n2. Initializing YOLOv8 tracker with 'models/best.pt'...")
@@ -160,7 +165,7 @@ def main():
 
     output_path = "output_videos/real_match_person_a.avi"
     os.makedirs("output_videos", exist_ok=True)
-    save_video(annotated_frames, output_path)
+    save_video(annotated_frames, output_path, fps=fps)
 
     print(f"\n[COMPLETE] Real video analysis successfully rendered!")
     print(f"  -> Output file: {os.path.abspath(output_path)}")

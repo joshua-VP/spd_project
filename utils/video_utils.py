@@ -22,21 +22,22 @@ def read_video(video_path):
     return frames
 
 
-def save_video(output_video_frames, output_video_path):
+def save_video(output_video_frames, output_video_path, fps=24):
     """
     Save a list of frame arrays to a video file.
 
-    Uses XVID codec at 24 FPS.
+    Uses XVID codec.
 
     Args:
         output_video_frames (list[np.ndarray]): List of BGR frame arrays.
         output_video_path (str): Path to the output video file.
+        fps (float | int): Frames per second (defaults to 24).
     """
     fourcc = cv2.VideoWriter_fourcc(*"XVID")
     out = cv2.VideoWriter(
         output_video_path,
         fourcc,
-        24,
+        fps,
         (output_video_frames[0].shape[1], output_video_frames[0].shape[0]),
     )
     for frame in output_video_frames:

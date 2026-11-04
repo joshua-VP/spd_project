@@ -16,12 +16,18 @@ from trackers import Tracker
 from team_assigner import TeamAssigner
 from player_ball_assigner import PlayerBallAssigner
 from camera_movement_estimator import CameraMovementEstimator
+import cv2
 import numpy as np
 
 
 def main():
     # ── 1. Read Video ───────────────────────────────────────────────────
-    video_frames = read_video("input_videos/input_video.mp4")
+    video_path = "input_videos/input_video.mp4"
+    cap = cv2.VideoCapture(video_path)
+    fps = cap.get(cv2.CAP_PROP_FPS) or 29.97
+    cap.release()
+
+    video_frames = read_video(video_path)
 
     # ── 2. Initialize Tracker & Get Object Tracks ───────────────────────
     tracker = Tracker("models/best.pt")
@@ -53,8 +59,17 @@ def main():
 
     # ── 5. Team Assignment (K-Means on Jersey Colors) ───────────────────
     team_assigner = TeamAssigner()
+    # Find a representative frame with multiple players to fit two team jersey clusters
+    ref_frame_idx = 0
+    for idx, p_track in enumerate(tracks["players"]):
+        if len(p_track) >= 6:
+            ref_frame_idx = idx
+            break
+        elif len(p_track) >= 2:
+            ref_frame_idx = idx
+
     team_assigner.assign_team_color(
-        video_frames[0], tracks["players"][0]
+        video_frames[ref_frame_idx], tracks["players"][ref_frame_idx]
     )
 
     for frame_num, player_track in enumerate(tracks["players"]):
@@ -95,7 +110,7 @@ def main():
         video_frames, tracks, team_ball_control
     )
 
-    save_video(output_video_frames, "output_videos/output_video.avi")
+    save_video(output_video_frames, "output_videos/output_video.avi", fps=fps)
 
     print("Pipeline complete. Output saved to output_videos/output_video.avi")
 

@@ -346,6 +346,7 @@ class Tracker:
     def draw_team_ball_control(self, frame, frame_num, team_ball_control):
         """
         Draw a semi-transparent ball possession statistics overlay.
+        Positions adaptively to any frame resolution (720p, 1080p, etc.).
 
         Args:
             frame (np.ndarray): Video frame to draw on.
@@ -355,9 +356,17 @@ class Tracker:
         Returns:
             np.ndarray: Frame with possession overlay drawn.
         """
+        h, w = frame.shape[:2]
+        box_w = int(w * 0.35)
+        box_h = int(h * 0.12)
+        x2 = w - 20
+        x1 = x2 - box_w
+        y2 = h - 20
+        y1 = y2 - box_h
+
         # Draw semi-transparent rectangle
         overlay = frame.copy()
-        cv2.rectangle(overlay, (1350, 850), (1900, 970), (255, 255, 255), -1)
+        cv2.rectangle(overlay, (x1, y1), (x2, y2), (255, 255, 255), -1)
         alpha = 0.4
         cv2.addWeighted(overlay, alpha, frame, 1 - alpha, 0, frame)
 
@@ -373,23 +382,27 @@ class Tracker:
             team_1 = team_1_num_frames / total
             team_2 = team_2_num_frames / total
 
+        font_scale = 0.55 if w <= 1280 else 0.85
+        thickness = 2
         cv2.putText(
             frame,
             f"Team 1 Ball Control: {team_1 * 100:.2f}%",
-            (1400, 900),
+            (x1 + 15, y1 + int(box_h * 0.42)),
             cv2.FONT_HERSHEY_SIMPLEX,
-            1,
+            font_scale,
             (0, 0, 0),
-            3,
+            thickness,
+            cv2.LINE_AA,
         )
         cv2.putText(
             frame,
             f"Team 2 Ball Control: {team_2 * 100:.2f}%",
-            (1400, 950),
+            (x1 + 15, y1 + int(box_h * 0.82)),
             cv2.FONT_HERSHEY_SIMPLEX,
-            1,
+            font_scale,
             (0, 0, 0),
-            3,
+            thickness,
+            cv2.LINE_AA,
         )
 
         return frame
@@ -409,8 +422,6 @@ class Tracker:
         """
         output_video_frames = []
         for frame_num, frame in enumerate(video_frames):
-            frame = frame.copy()
-
             player_dict = tracks["players"][frame_num]
             ball_dict = tracks["ball"][frame_num]
             referee_dict = tracks["referees"][frame_num]
