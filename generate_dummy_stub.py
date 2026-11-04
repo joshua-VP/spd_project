@@ -116,4 +116,3 @@ if __name__ == "__main__":
     # Report ball detection stats
     ball_detected = sum(1 for b in tracks["ball"] if len(b) > 0)
     print(f"  Ball detected in: {ball_detected}/{len(tracks['ball'])} frames")
-

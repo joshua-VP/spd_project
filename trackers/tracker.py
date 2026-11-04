@@ -34,7 +34,13 @@ class Tracker:
         """
         self.model_path = model_path
         self.model = YOLO(model_path) if model_path and os.path.exists(model_path) else None
-        self.tracker = sv.ByteTrack()
+        self.tracker = sv.ByteTrack(
+            track_activation_threshold=0.30,
+            lost_track_buffer=60,
+            minimum_matching_threshold=0.85,
+            frame_rate=25,
+            minimum_consecutive_frames=1,
+        )
 
     def add_position_to_tracks(self, tracks):
         """
@@ -113,7 +119,7 @@ class Tracker:
         detections = []
         for i in range(0, len(frames), batch_size):
             detections_batch = self.model.predict(
-                frames[i : i + batch_size], conf=0.1
+                frames[i : i + batch_size], conf=0.25, iou=0.35
             )
             detections += detections_batch
         return detections
@@ -167,18 +173,31 @@ class Tracker:
             # Convert YOLO results to supervision Detections
             detection_supervision = sv.Detections.from_ultralytics(detection)
 
+            # Class-agnostic NMS to eliminate duplicate overlapping bounding boxes on the same player
+            detection_supervision = detection_supervision.with_nms(
+                threshold=0.35, class_agnostic=True
+            )
+
             # Override goalkeeper class ID (1) → player class ID (2)
             # so goalkeepers are tracked seamlessly with outfield players
             for object_ind, class_id in enumerate(detection_supervision.class_id):
-                if cls_names[class_id] == "goalkeeper":
+                if cls_names.get(class_id) == "goalkeeper":
                     detection_supervision.class_id[object_ind] = cls_names_inv[
                         "player"
                     ]
 
+            # Filter: Pass ONLY players and referees to ByteTrack with conf >= 0.30
+            # Exclude ball so fast ball trajectory does not fragment or steal player track IDs
+            is_player = detection_supervision.class_id == cls_names_inv.get("player")
+            is_referee = detection_supervision.class_id == cls_names_inv.get("referee")
+            is_person = is_player | is_referee
+
+            # Confidence threshold: players & referees must have conf >= 0.30
+            valid_person_mask = is_person & (detection_supervision.confidence >= 0.30)
+            det_persons = detection_supervision[valid_person_mask]
+
             # Run ByteTrack to assign persistent IDs
-            detection_with_tracks = self.tracker.update_with_detections(
-                detection_supervision
-            )
+            detection_with_tracks = self.tracker.update_with_detections(det_persons)
 
             # Build per-frame track dictionaries
             tracks["players"].append({})
@@ -201,12 +220,18 @@ class Tracker:
                     tracks["referees"][frame_num][track_id] = {"bbox": bbox}
 
             # Handle ball separately (no track ID, use fixed ID=1)
-            for frame_detection in detection_supervision:
-                bbox = frame_detection[0].tolist()
-                cls_id = frame_detection[3]
+            # Take highest-confidence ball detection above 0.15 threshold
+            ball_mask = (detection_supervision.class_id == cls_names_inv.get("ball")) & (
+                detection_supervision.confidence >= 0.15
+            )
+            ball_detections = detection_supervision[ball_mask]
+            if len(ball_detections) > 0:
+                best_ball_idx = int(np.argmax(ball_detections.confidence))
+                best_ball_bbox = ball_detections.xyxy[best_ball_idx].tolist()
+                tracks["ball"][frame_num][1] = {"bbox": best_ball_bbox}
 
-                if cls_id == cls_names_inv.get("ball"):
-                    tracks["ball"][frame_num][1] = {"bbox": bbox}
+        # Apply Exponential Moving Average (EMA) smoothing to eliminate inter-frame jitter
+        self.smooth_player_tracks(tracks)
 
         # Save tracks to stub for future fast loading
         if stub_path is not None:
@@ -217,6 +242,22 @@ class Tracker:
                 pickle.dump(tracks, f)
 
         return tracks
+
+    def smooth_player_tracks(self, tracks, alpha=0.65):
+        """
+        Apply Exponential Moving Average (EMA) to player bounding boxes
+        to eliminate inter-frame detection jitter and coordinate shaking.
+        """
+        prev_positions = {}
+        for frame_num, player_dict in enumerate(tracks["players"]):
+            for track_id, p_info in player_dict.items():
+                curr_box = np.array(p_info["bbox"], dtype=float)
+                if track_id in prev_positions:
+                    smoothed_box = alpha * curr_box + (1.0 - alpha) * prev_positions[track_id]
+                else:
+                    smoothed_box = curr_box
+                prev_positions[track_id] = smoothed_box
+                player_dict[track_id]["bbox"] = smoothed_box.tolist()
 
     def draw_ellipse(self, frame, bbox, color, track_id=None):
         """
@@ -235,26 +276,27 @@ class Tracker:
         x_center, _ = get_center_of_bbox(bbox)
         width = get_bbox_width(bbox)
 
+        # Draw foot anchor ellipse (semi-axes: half width and 0.20 width)
         cv2.ellipse(
             frame,
             center=(x_center, y2),
-            axes=(int(width), int(0.35 * width)),
+            axes=(max(10, int(width * 0.50)), max(4, int(width * 0.18))),
             angle=0.0,
             startAngle=-45,
             endAngle=235,
             color=color,
             thickness=2,
-            lineType=cv2.LINE_4,
+            lineType=cv2.LINE_AA,
         )
 
         # Draw track ID label rectangle + text
         if track_id is not None:
-            rectangle_width = 40
-            rectangle_height = 20
+            rectangle_width = 34
+            rectangle_height = 18
             x1_rect = x_center - rectangle_width // 2
             x2_rect = x_center + rectangle_width // 2
-            y1_rect = (y2 - rectangle_height // 2) + 15
-            y2_rect = (y2 + rectangle_height // 2) + 15
+            y1_rect = y2 + 4
+            y2_rect = y2 + 4 + rectangle_height
 
             cv2.rectangle(
                 frame,
@@ -264,18 +306,15 @@ class Tracker:
                 cv2.FILLED,
             )
 
-            x1_text = x1_rect + 12
-            if track_id > 99:
-                x1_text -= 10
-
             cv2.putText(
                 frame,
                 f"{track_id}",
-                (int(x1_text), int(y1_rect + 15)),
+                (int(x_center - 8), int(y1_rect + 14)),
                 cv2.FONT_HERSHEY_SIMPLEX,
-                0.6,
+                0.45,
                 (0, 0, 0),
                 2,
+                cv2.LINE_AA,
             )
 
         return frame

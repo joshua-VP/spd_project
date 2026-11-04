@@ -22,7 +22,7 @@ from trackers import Tracker
 from camera_movement_estimator import CameraMovementEstimator
 
 
-def draw_person_a_visuals(frames, tracks, camera_movement):
+def draw_person_a_visuals(tracker, frames, tracks, camera_movement):
     """
     Render Person A visual annotations:
     - Ground ellipses for players and referees with persistent ByteTrack IDs
@@ -38,64 +38,15 @@ def draw_person_a_visuals(frames, tracks, camera_movement):
         player_dict = tracks["players"][frame_idx]
         for track_id, p_info in player_dict.items():
             bbox = p_info["bbox"]
-            x1, y1, x2, y2 = bbox
-            x_center = int((x1 + x2) / 2)
-            y_foot = int(y2)
-            width = int(x2 - x1)
-
-            # Vibrant cyan ellipse for players
             color = (255, 200, 0)
-            cv2.ellipse(
-                canvas,
-                (x_center, y_foot),
-                (width // 2, int(0.35 * width)),
-                0,
-                -45,
-                235,
-                color,
-                2,
-            )
-
-            # Track ID box
-            box_w, box_h = 32, 18
-            cv2.rectangle(
-                canvas,
-                (x_center - box_w // 2, y_foot + 4),
-                (x_center + box_w // 2, y_foot + 4 + box_h),
-                color,
-                -1,
-            )
-            cv2.putText(
-                canvas,
-                f"{track_id}",
-                (x_center - 10, y_foot + 17),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.45,
-                (0, 0, 0),
-                2,
-            )
+            canvas = tracker.draw_ellipse(canvas, bbox, color, track_id)
 
         # 2. Draw Referees
         ref_dict = tracks["referees"][frame_idx]
         for track_id, r_info in ref_dict.items():
             bbox = r_info["bbox"]
-            x1, y1, x2, y2 = bbox
-            x_center = int((x1 + x2) / 2)
-            y_foot = int(y2)
-            width = int(x2 - x1)
-
-            # Bright yellow ellipse for referees
             color = (0, 255, 255)
-            cv2.ellipse(
-                canvas,
-                (x_center, y_foot),
-                (width // 2, int(0.35 * width)),
-                0,
-                -45,
-                235,
-                color,
-                2,
-            )
+            canvas = tracker.draw_ellipse(canvas, bbox, color)
 
         # 3. Draw Ball Tracker Triangle
         ball_dict = tracks["ball"][frame_idx]
@@ -205,7 +156,7 @@ def main():
 
     # 6. Render visual video
     print("\n6. Rendering tracking ellipses, ball markers, and HUD overlay...")
-    annotated_frames = draw_person_a_visuals(frames, tracks, camera_movement)
+    annotated_frames = draw_person_a_visuals(tracker, frames, tracks, camera_movement)
 
     output_path = "output_videos/real_match_person_a.avi"
     os.makedirs("output_videos", exist_ok=True)
@@ -219,3 +170,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

@@ -27,6 +27,7 @@ stubs/*.pkl
 # Video files (too large for git)
 input_videos/*.mp4
 input_videos/*.avi
+input_videos/*.webm
 output_videos/*.avi
 output_videos/*.mp4
 
