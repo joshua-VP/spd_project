@@ -17,12 +17,12 @@ Output: output_videos/real_match_person_a.avi
 import os
 import cv2
 import numpy as np
-from utils import read_video, save_video
+from utils import read_video, save_video, get_video_fps
 from trackers import Tracker
 from camera_movement_estimator import CameraMovementEstimator
 
 
-def draw_person_a_visuals(tracker, frames, tracks, camera_movement, draw_mode="bbox"):
+def draw_person_a_visuals(tracker, frames, tracks, camera_movement, draw_mode="ellipse"):
     """
     Render Person A visual annotations:
     - Bounding boxes with persistent ByteTrack ID badges (or foot ellipses)
@@ -120,9 +120,7 @@ def main():
 
     # 1. Read Video
     print(f"\n1. Loading video: {video_path}...")
-    cap = cv2.VideoCapture(video_path)
-    fps = cap.get(cv2.CAP_PROP_FPS) or 29.97
-    cap.release()
+    fps = get_video_fps(video_path)
 
     frames = read_video(video_path)
     duration = len(frames) / fps if fps > 0 else 0

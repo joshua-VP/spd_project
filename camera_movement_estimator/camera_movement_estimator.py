@@ -5,7 +5,7 @@ import os
 import sys
 
 sys.path.append("../")
-from utils import measure_distance
+from utils import measure_distance, measure_xy_distance
 
 
 class CameraMovementEstimator:
@@ -156,8 +156,7 @@ class CameraMovementEstimator:
                         new_point = new.ravel()
                         old_point = old.ravel()
 
-                        diff_x = new_point[0] - old_point[0]
-                        diff_y = new_point[1] - old_point[1]
+                        diff_x, diff_y = measure_xy_distance(new_point, old_point)
                         diff_x_list.append(diff_x)
                         diff_y_list.append(diff_y)
 

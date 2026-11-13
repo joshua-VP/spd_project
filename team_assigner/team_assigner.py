@@ -49,7 +49,12 @@ class TeamAssigner:
         Returns:
             np.ndarray: RGB color array of the jersey.
         """
-        image = frame[int(bbox[1]) : int(bbox[3]), int(bbox[0]) : int(bbox[2])]
+        y1, y2 = max(0, int(bbox[1])), min(frame.shape[0], int(bbox[3]))
+        x1, x2 = max(0, int(bbox[0])), min(frame.shape[1], int(bbox[2]))
+        if y2 - y1 < 4 or x2 - x1 < 4:
+            return np.array([128.0, 128.0, 128.0])
+
+        image = frame[y1:y2, x1:x2]
 
         # Take top half of the player crop (jersey area)
         top_half_image = image[0 : int(image.shape[0] / 2), :]

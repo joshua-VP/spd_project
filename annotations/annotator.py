@@ -35,17 +35,17 @@ SPEED_TEXT_COLOR = (255, 255, 255)         # White telemetry text
 ELLIPSE_ALPHA = 0.6                        # Overlay blend weight (0.0 to 1.0)
 
 # Ellipse geometry
-ELLIPSE_VERTICAL_RATIO = 0.35              # vertical axis = 0.35 * width
+ELLIPSE_VERTICAL_RATIO = 0.20              # vertical axis = 0.35 * width
 ELLIPSE_START_ANGLE = -45                  # degrees
 ELLIPSE_END_ANGLE = 235                    # degrees (open ground arc)
 ELLIPSE_THICKNESS = 2
 
 # Player ID badge
-BADGE_WIDTH = 40                           # px
-BADGE_HEIGHT = 20                          # px
-BADGE_OFFSET_Y = 12                        # px below bbox bottom (cy)
+BADGE_WIDTH = 34                           # px
+BADGE_HEIGHT = 18                          # px
+BADGE_OFFSET_Y = 2                        # px below bbox bottom (cy)
 BADGE_FONT = cv2.FONT_HERSHEY_SIMPLEX
-BADGE_FONT_SCALE = 0.5
+BADGE_FONT_SCALE = 0.45
 BADGE_FONT_THICKNESS = 2
 
 # Marker Triangles (Inverted: tip pointing down)
@@ -126,8 +126,18 @@ class Annotator:
             # ------------------------------------------------------------------
             overlay = frame.copy()
 
+            # Depth sort entities back-to-front (increasing y2) so foreground players cleanly sit on top
+            sorted_players = sorted(
+                players_dict.items(),
+                key=lambda item: item[1]["bbox"][3] if "bbox" in item[1] and len(item[1]["bbox"]) == 4 else 0,
+            )
+            sorted_referees = sorted(
+                referees_dict.items(),
+                key=lambda item: item[1]["bbox"][3] if "bbox" in item[1] and len(item[1]["bbox"]) == 4 else 0,
+            )
+
             # Player ellipses
-            for track_id, p_info in players_dict.items():
+            for track_id, p_info in sorted_players:
                 if "bbox" not in p_info:
                     continue
                 bbox = p_info["bbox"]
@@ -141,7 +151,7 @@ class Annotator:
                 color = p_info.get("team_color", DEFAULT_PLAYER_COLOR)
                 color = tuple(int(c) for c in color)
 
-                axes = (max(1, width), max(1, int(width * ELLIPSE_VERTICAL_RATIO)))
+                axes = (max(8, int(width * 0.50)), max(3, int(width * ELLIPSE_VERTICAL_RATIO)))
                 cv2.ellipse(
                     overlay,
                     center=(cx, cy),
@@ -155,7 +165,7 @@ class Annotator:
                 )
 
             # Referee ellipses
-            for track_id, r_info in referees_dict.items():
+            for track_id, r_info in sorted_referees:
                 if "bbox" not in r_info:
                     continue
                 bbox = r_info["bbox"]
@@ -166,7 +176,7 @@ class Annotator:
                 if width < 2:
                     continue
 
-                axes = (max(1, width), max(1, int(width * ELLIPSE_VERTICAL_RATIO)))
+                axes = (max(8, int(width * 0.50)), max(3, int(width * ELLIPSE_VERTICAL_RATIO)))
                 cv2.ellipse(
                     overlay,
                     center=(cx, cy),
@@ -185,7 +195,7 @@ class Annotator:
             # ------------------------------------------------------------------
             # b) Player ID Badges, e) Possession, f) Speed & Distance
             # ------------------------------------------------------------------
-            for track_id, p_info in players_dict.items():
+            for track_id, p_info in sorted_players:
                 if "bbox" not in p_info:
                     continue
                 bbox = p_info["bbox"]
@@ -203,6 +213,7 @@ class Annotator:
                 rect_y2 = rect_y1 + BADGE_HEIGHT
 
                 cv2.rectangle(frame, (rect_x1, rect_y1), (rect_x2, rect_y2), color, cv2.FILLED)
+                cv2.rectangle(frame, (rect_x1, rect_y1), (rect_x2, rect_y2), (0, 0, 0), 1, cv2.LINE_AA)
 
                 label = str(track_id)
                 (tw, th), _ = cv2.getTextSize(label, BADGE_FONT, BADGE_FONT_SCALE, BADGE_FONT_THICKNESS)
@@ -268,6 +279,41 @@ class Annotator:
                         SPEED_FONT_THICKNESS,
                         cv2.LINE_AA,
                     )
+
+            # ------------------------------------------------------------------
+            # Referee Badge: Dedicated "REF" sign below feet in referee yellow
+            # ------------------------------------------------------------------
+            for track_id, r_info in sorted_referees:
+                if "bbox" not in r_info:
+                    continue
+                bbox = r_info["bbox"]
+                x1, y1, x2, y2 = [int(v) for v in bbox]
+                cx = int((x1 + x2) / 2)
+                cy = y2
+
+                ref_badge_w = max(BADGE_WIDTH, 38)
+                rect_x1 = cx - ref_badge_w // 2
+                rect_x2 = cx + ref_badge_w // 2
+                rect_y1 = cy + BADGE_OFFSET_Y
+                rect_y2 = rect_y1 + BADGE_HEIGHT
+
+                cv2.rectangle(frame, (rect_x1, rect_y1), (rect_x2, rect_y2), REFEREE_COLOR, cv2.FILLED)
+                cv2.rectangle(frame, (rect_x1, rect_y1), (rect_x2, rect_y2), OUTLINE_COLOR, 1, cv2.LINE_AA)
+
+                label = "REF"
+                (tw, th), _ = cv2.getTextSize(label, BADGE_FONT, BADGE_FONT_SCALE, BADGE_FONT_THICKNESS)
+                text_x = cx - tw // 2
+                text_y = rect_y1 + (BADGE_HEIGHT + th) // 2
+                cv2.putText(
+                    frame,
+                    label,
+                    (text_x, text_y),
+                    BADGE_FONT,
+                    BADGE_FONT_SCALE,
+                    BADGE_TEXT_COLOR,
+                    BADGE_FONT_THICKNESS,
+                    cv2.LINE_AA,
+                )
 
             # ------------------------------------------------------------------
             # d) Ball: filled green inverted triangle with dark outline

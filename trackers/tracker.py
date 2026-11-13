@@ -35,9 +35,9 @@ class Tracker:
         self.model_path = model_path
         self.model = YOLO(model_path) if model_path and os.path.exists(model_path) else None
         self.tracker = sv.ByteTrack(
-            track_activation_threshold=0.30,
+            track_activation_threshold=0.25,
             lost_track_buffer=60,
-            minimum_matching_threshold=0.85,
+            minimum_matching_threshold=0.60,
             frame_rate=25,
             minimum_consecutive_frames=1,
         )
@@ -117,9 +117,12 @@ class Tracker:
 
         batch_size = 20
         detections = []
-        for i in range(0, len(frames), batch_size):
+        total_batches = (len(frames) + batch_size - 1) // batch_size
+        for batch_idx, i in enumerate(range(0, len(frames), batch_size)):
+            if (batch_idx + 1) % 5 == 0 or batch_idx == 0 or (batch_idx + 1) == total_batches:
+                print(f"   YOLO batch {batch_idx + 1}/{total_batches} (frames {i}-{min(len(frames), i + batch_size)})...", flush=True)
             detections_batch = self.model.predict(
-                frames[i : i + batch_size], conf=0.25, iou=0.35
+                frames[i : i + batch_size], conf=0.25, iou=0.35, verbose=False
             )
             detections += detections_batch
         return detections
@@ -263,24 +266,16 @@ class Tracker:
         self,
         tracks,
         camera_movement=None,
-        max_gap=60,
-        max_distance=120,
-        min_track_length=8,
+        max_gap=45,
+        max_distance=80,
+        min_track_length=2,
     ):
         """
-        Stitch fragmented tracklets and prune short-lived spurious detections.
-        Uses camera movement compensation so panning does not cause tracklet mismatch.
-
-        Args:
-            tracks (dict): Object tracks dictionary.
-            camera_movement (list, optional): Per-frame camera displacement [[dx, dy], ...].
-            max_gap (int): Max frame gap between tracklets to consider for merging (default 60 = 2.0s).
-            max_distance (float): Max pitch-space pixel distance to stitch tracklets (default 120px).
-            min_track_length (int): Minimum frames a tracklet must exist to not be pruned as noise (default 8).
-
-        Returns:
-            dict: Tracks dictionary with stabilized, persistent player IDs.
+        Stitch fragmented tracklets across occlusions without dropping overlapping players.
+        Uses camera movement compensation so panning does not cause tracklet mismatch,
+        and enforces a temporal overlap guard so two players in the same frame never merge.
         """
+        import copy
         players = tracks["players"]
         num_frames = len(players)
         if num_frames == 0:
@@ -310,12 +305,12 @@ class Tracker:
                         "end_f": f_idx,
                         "start_pos": global_center,
                         "end_pos": global_center,
-                        "frames": {f_idx: info},
+                        "frames": {f_idx: copy.copy(info)},
                     }
                 else:
                     tracklets[tid]["end_f"] = f_idx
                     tracklets[tid]["end_pos"] = global_center
-                    tracklets[tid]["frames"][f_idx] = info
+                    tracklets[tid]["frames"][f_idx] = copy.copy(info)
 
         # 2. Filter out ephemeral noise (< min_track_length)
         valid_tracklets = {
@@ -324,11 +319,12 @@ class Tracker:
             if len(t["frames"]) >= min_track_length
         }
 
-        # 3. Stitch tracklets using Union-Find
+        # 3. Stitch tracklets using Union-Find with temporal collision protection
         sorted_tids = sorted(
             valid_tracklets.keys(), key=lambda x: valid_tracklets[x]["start_f"]
         )
         id_map = {tid: tid for tid in sorted_tids}
+        root_frames = {tid: set(valid_tracklets[tid]["frames"].keys()) for tid in sorted_tids}
 
         def get_root(tid):
             while id_map[tid] != tid:
@@ -349,6 +345,10 @@ class Tracker:
                 if root1 == root2:
                     continue
 
+                # NEVER merge two track clusters if they share ANY active video frames
+                if root_frames[root1].intersection(root_frames[root2]):
+                    continue
+
                 gap = t2["start_f"] - t1["end_f"]
                 if 1 <= gap <= max_gap:
                     d = np.hypot(
@@ -363,6 +363,7 @@ class Tracker:
 
             if best_candidate is not None:
                 id_map[best_candidate] = root1
+                root_frames[root1].update(root_frames[best_candidate])
 
         # 4. Clean re-numbering for consistent player IDs
         unique_roots = []
@@ -377,11 +378,327 @@ class Tracker:
         for tid, t in valid_tracklets.items():
             clean_id = root_to_clean_id[get_root(tid)]
             for f_idx, info in t["frames"].items():
-                if clean_id not in stitched_players[f_idx]:
-                    stitched_players[f_idx][clean_id] = info
+                stitched_players[f_idx][clean_id] = copy.copy(info)
 
         tracks["players"] = stitched_players
         return tracks
+
+    def interpolate_player_tracks(self, tracks, max_gap=3):
+        """
+        Linearly interpolate player bounding boxes across short occlusion gaps (1-3 frames).
+        Prevents ellipses and ID labels from flickering or disappearing when players pass each other.
+        """
+        import copy
+        from collections import defaultdict
+        players = tracks["players"]
+        num_frames = len(players)
+
+        player_frames = defaultdict(dict)
+        for f_idx, f_dict in enumerate(players):
+            for tid, info in f_dict.items():
+                player_frames[tid][f_idx] = info
+
+        for tid, f_map in player_frames.items():
+            sorted_f = sorted(f_map.keys())
+            for idx in range(len(sorted_f) - 1):
+                f1 = sorted_f[idx]
+                f2 = sorted_f[idx + 1]
+                gap = f2 - f1
+                if 1 < gap <= (max_gap + 1):
+                    b1 = np.array(f_map[f1]["bbox"], dtype=float)
+                    b2 = np.array(f_map[f2]["bbox"], dtype=float)
+                    template_info = copy.copy(f_map[f1])
+                    for step in range(1, gap):
+                        frac = step / gap
+                        interp_box = (b1 + (b2 - b1) * frac).tolist()
+                        fill_frame = f1 + step
+                        new_info = copy.copy(template_info)
+                        new_info["bbox"] = interp_box
+                        players[fill_frame][tid] = new_info
+        return tracks
+
+    def stabilize_player_ids(
+        self,
+        video_frames,
+        tracks,
+        camera_movement=None,
+        team_assigner=None,
+        max_match_dist=85.0,
+        max_lost_frames=25,
+    ):
+        """
+        Optimal bipartite matching with velocity projection and jersey color preservation.
+        Ensures each player's ID stays permanently attached even during crosses, tackles,
+        and close overlaps.
+        """
+        import copy
+        from scipy.optimize import linear_sum_assignment
+        from team_assigner import TeamAssigner
+
+        players = tracks["players"]
+        num_frames = len(players)
+        if num_frames == 0 or len(video_frames) == 0:
+            return tracks
+
+        # 1. Setup Team Assigner if not provided
+        if team_assigner is None:
+            team_assigner = TeamAssigner()
+            ref_idx = 0
+            for idx, p_track in enumerate(players):
+                if len(p_track) >= 6:
+                    ref_idx = idx
+                    break
+            team_assigner.assign_team_color(video_frames[ref_idx], players[ref_idx])
+
+        c1 = team_assigner.team_colors.get(1, np.array([40, 40, 220]))
+        c2 = team_assigner.team_colors.get(2, np.array([220, 220, 220]))
+
+        # Cumulative camera displacement for pitch-space continuous tracking
+        if camera_movement is not None and len(camera_movement) == num_frames:
+            cum_cam = np.cumsum(camera_movement, axis=0)
+        else:
+            cum_cam = np.zeros((num_frames, 2))
+
+        class PlayerTracklet:
+            def __init__(self, tid, f_idx, box, pitch_pos, team_id, team_color):
+                self.id = tid
+                self.team_votes = {1: 0, 2: 0}
+                if team_id in self.team_votes:
+                    self.team_votes[team_id] += 1
+                self.team = team_id
+                self.team_color = team_color
+                self.last_f = f_idx
+                self.pos = np.array(pitch_pos, dtype=float)
+                self.vel = np.zeros(2, dtype=float)
+                self.box = list(box)
+                self.frames_lost = 0
+
+            def predict(self):
+                return self.pos + self.vel * 0.95
+
+            def update(self, f_idx, box, pitch_pos, team_id, team_color):
+                new_pos = np.array(pitch_pos, dtype=float)
+                dt = max(1, f_idx - self.last_f)
+                inst_vel = (new_pos - self.pos) / dt
+                self.vel = 0.70 * self.vel + 0.30 * inst_vel
+                self.pos = new_pos
+                self.box = list(box)
+                self.last_f = f_idx
+                self.frames_lost = 0
+                if team_id in self.team_votes:
+                    self.team_votes[team_id] += 1
+                    self.team = max(self.team_votes, key=self.team_votes.get)
+                    if team_assigner is not None and hasattr(team_assigner, "team_colors") and self.team in team_assigner.team_colors:
+                        self.team_color = team_assigner.team_colors[self.team]
+
+            def extrapolate(self, f_idx, cam_off):
+                self.pos = self.pos + self.vel * 0.90
+                w = self.box[2] - self.box[0]
+                h = self.box[3] - self.box[1]
+                foot_x = self.pos[0] + cam_off[0]
+                foot_y = self.pos[1] + cam_off[1]
+                self.box = [foot_x - w / 2.0, foot_y - h, foot_x + w / 2.0, foot_y]
+                self.frames_lost += 1
+
+        active_tracks = []
+        next_id = 1
+        stage1_players = [{} for _ in range(num_frames)]
+
+        for f_idx in range(num_frames):
+            cam_off = cum_cam[f_idx]
+            frame = video_frames[f_idx]
+            f_dets = players[f_idx]
+
+            dets = []
+            det_boxes = []
+            det_teams = []
+            det_colors = []
+
+            for raw_id, info in f_dets.items():
+                box = info["bbox"]
+                foot_x = (box[0] + box[2]) / 2.0 - cam_off[0]
+                foot_y = box[3] - cam_off[1]
+                dets.append([foot_x, foot_y])
+                det_boxes.append(box)
+
+                # Fast torso median color
+                b = [int(v) for v in box]
+                w = max(1, b[2] - b[0])
+                h = max(1, b[3] - b[1])
+                y_start = max(0, b[1] + int(h * 0.15))
+                y_end = min(frame.shape[0], b[1] + int(h * 0.45))
+                x_start = max(0, b[0] + int(w * 0.25))
+                x_end = min(frame.shape[1], b[0] + int(w * 0.75))
+                torso = frame[y_start:y_end, x_start:x_end]
+                if torso.size > 0:
+                    med_color = np.median(torso, axis=(0, 1))
+                    d1 = np.linalg.norm(med_color - c1)
+                    d2 = np.linalg.norm(med_color - c2)
+                    team = 1 if d1 < d2 else 2
+                else:
+                    team = 1
+                det_teams.append(team)
+                det_colors.append(team_assigner.team_colors[team])
+
+            active_tracks = [t for t in active_tracks if t.frames_lost <= max_lost_frames]
+
+            if len(dets) == 0:
+                for t in active_tracks:
+                    t.extrapolate(f_idx, cam_off)
+                    if t.frames_lost <= 3:
+                        stage1_players[f_idx][t.id] = {
+                            "bbox": [float(v) for v in t.box],
+                            "team": t.team,
+                            "team_color": t.team_color,
+                        }
+                continue
+
+            if len(active_tracks) == 0:
+                for d_idx in range(len(dets)):
+                    t = PlayerTracklet(next_id, f_idx, det_boxes[d_idx], dets[d_idx], det_teams[d_idx], det_colors[d_idx])
+                    next_id += 1
+                    active_tracks.append(t)
+                    stage1_players[f_idx][t.id] = {
+                        "bbox": [float(v) for v in t.box],
+                        "team": t.team,
+                        "team_color": t.team_color,
+                    }
+                continue
+
+            # Hungarian Cost Matrix with velocity projection & team color preservation
+            cost = np.full((len(active_tracks), len(dets)), 1e6, dtype=float)
+            for t_idx, t in enumerate(active_tracks):
+                pred = t.predict()
+                for d_idx in range(len(dets)):
+                    dist = np.hypot(pred[0] - dets[d_idx][0], pred[1] - dets[d_idx][1])
+                    if dist < max_match_dist:
+                        team_pen = 0.0 if t.team == det_teams[d_idx] else 150.0
+                        cost[t_idx, d_idx] = dist + team_pen
+
+            row_ind, col_ind = linear_sum_assignment(cost)
+            matched_t = set()
+            matched_d = set()
+
+            for r, c in zip(row_ind, col_ind):
+                if cost[r, c] < 200.0:
+                    active_tracks[r].update(f_idx, det_boxes[c], dets[c], det_teams[c], det_colors[c])
+                    stage1_players[f_idx][active_tracks[r].id] = {
+                        "bbox": [float(v) for v in active_tracks[r].box],
+                        "team": active_tracks[r].team,
+                        "team_color": active_tracks[r].team_color,
+                    }
+                    matched_t.add(r)
+                    matched_d.add(c)
+
+            # Extrapolate unmatched active tracks for up to 3 frames during momentary overlap
+            for t_idx, t in enumerate(active_tracks):
+                if t_idx not in matched_t:
+                    t.extrapolate(f_idx, cam_off)
+                    if t.frames_lost <= 3:
+                        stage1_players[f_idx][t.id] = {
+                            "bbox": [float(v) for v in t.box],
+                            "team": t.team,
+                            "team_color": t.team_color,
+                        }
+
+            # Unmatched detections get new IDs
+            for d_idx in range(len(dets)):
+                if d_idx not in matched_d:
+                    t = PlayerTracklet(next_id, f_idx, det_boxes[d_idx], dets[d_idx], det_teams[d_idx], det_colors[d_idx])
+                    next_id += 1
+                    active_tracks.append(t)
+                    stage1_players[f_idx][t.id] = {
+                        "bbox": [float(v) for v in t.box],
+                        "team": t.team,
+                        "team_color": t.team_color,
+                    }
+
+        # Stage 2: Tracklet stitching across longer gaps (team-aware, collision-free)
+        tracklets = {}
+        for f_idx, f_dict in enumerate(stage1_players):
+            cam_off = cum_cam[f_idx]
+            for tid, info in f_dict.items():
+                box = info["bbox"]
+                gc = ((box[0] + box[2]) / 2.0 - cam_off[0], box[3] - cam_off[1])
+                if tid not in tracklets:
+                    tracklets[tid] = {
+                        "id": tid,
+                        "team": info["team"],
+                        "team_color": info["team_color"],
+                        "start_f": f_idx,
+                        "end_f": f_idx,
+                        "start_pos": gc,
+                        "end_pos": gc,
+                        "frames": {f_idx: info},
+                    }
+                else:
+                    tracklets[tid]["end_f"] = f_idx
+                    tracklets[tid]["end_pos"] = gc
+                    tracklets[tid]["frames"][f_idx] = info
+
+        sorted_tids = sorted(tracklets.keys(), key=lambda x: tracklets[x]["start_f"])
+        id_map = {tid: tid for tid in sorted_tids}
+        root_frames = {tid: set(tracklets[tid]["frames"].keys()) for tid in sorted_tids}
+
+        def get_root(tid):
+            while id_map[tid] != tid:
+                id_map[tid] = id_map[id_map[tid]]
+                tid = id_map[tid]
+            return tid
+
+        for i, tid1 in enumerate(sorted_tids):
+            t1 = tracklets[tid1]
+            root1 = get_root(tid1)
+            best_candidate = None
+            min_dist = float("inf")
+
+            for j in range(i + 1, len(sorted_tids)):
+                tid2 = sorted_tids[j]
+                t2 = tracklets[tid2]
+                root2 = get_root(tid2)
+                if root1 == root2:
+                    continue
+                if root_frames[root1].intersection(root_frames[root2]):
+                    continue
+
+                gap = t2["start_f"] - t1["end_f"]
+                if 1 <= gap <= 90:
+                    d = np.hypot(t2["start_pos"][0] - t1["end_pos"][0], t2["start_pos"][1] - t1["end_pos"][1])
+                    max_d = min(220.0, 90.0 + gap * 12.0)
+                    team_match = (t1["team"] == t2["team"])
+                    if (team_match and d <= max_d) or (d <= 70.0):
+                        cost = d + (0.0 if team_match else 50.0)
+                        if cost < min_dist:
+                            min_dist = cost
+                            best_candidate = root2
+                elif gap > 90:
+                    break
+
+            if best_candidate is not None:
+                id_map[best_candidate] = root1
+                root_frames[root1].update(root_frames[best_candidate])
+
+        unique_roots = []
+        for tid in sorted_tids:
+            r = get_root(tid)
+            if r not in unique_roots:
+                unique_roots.append(r)
+        root_to_clean_id = {r: i + 1 for i, r in enumerate(unique_roots)}
+
+        final_players = [{} for _ in range(num_frames)]
+        for tid, t in tracklets.items():
+            clean_id = root_to_clean_id[get_root(tid)]
+            for f_idx, info in t["frames"].items():
+                info_copy = dict(info)
+                final_players[f_idx][clean_id] = info_copy
+
+        tracks["players"] = final_players
+
+        # Smooth bounding boxes to eliminate inter-frame coordinate shaking
+        self.smooth_player_tracks(tracks, alpha=0.70)
+
+        return tracks
+
 
     def draw_bbox(self, frame, bbox, color, track_id=None, has_ball=False):
         """

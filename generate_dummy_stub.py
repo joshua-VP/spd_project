@@ -404,6 +404,70 @@ def generate(num_frames: int = 50, seed: int = 42,
     print("Contract checks passed.")
 
 
+def generate_dummy_tracks(num_frames: int = 50, num_players: int = 10, num_referees: int = 2) -> dict:
+    """
+    Generate a mock tracks dictionary with realistic-looking bounding boxes.
+    Retained for backward compatibility with test_person_a.py, generate_sample_match.py,
+    and demo_person_a.py.
+    """
+    tracks = {"players": [], "referees": [], "ball": []}
+
+    player_base_positions = []
+    for _ in range(num_players):
+        x = random.randint(200, 1700)
+        y = random.randint(200, 900)
+        player_base_positions.append((x, y))
+
+    referee_base_positions = []
+    for _ in range(num_referees):
+        x = random.randint(600, 1300)
+        y = random.randint(300, 700)
+        referee_base_positions.append((x, y))
+
+    ball_x, ball_y = 960, 540
+
+    for frame_num in range(num_frames):
+        players_dict = {}
+        for player_id in range(1, num_players + 1):
+            base_x, base_y = player_base_positions[player_id - 1]
+            x1 = float(base_x + random.randint(-20, 20))
+            y1 = float(base_y + random.randint(-15, 15))
+            w = float(random.randint(40, 60))
+            h = float(random.randint(80, 120))
+            players_dict[player_id] = {"bbox": [x1, y1, x1 + w, y1 + h]}
+
+        referees_dict = {}
+        for ref_id in range(1, num_referees + 1):
+            base_x, base_y = referee_base_positions[ref_id - 1]
+            x1 = float(base_x + random.randint(-10, 10))
+            y1 = float(base_y + random.randint(-10, 10))
+            w = float(random.randint(35, 50))
+            h = float(random.randint(75, 110))
+            referees_dict[ref_id] = {"bbox": [x1, y1, x1 + w, y1 + h]}
+
+        ball_dict = {}
+        if random.random() > 0.2:
+            ball_x += random.randint(-30, 30)
+            ball_y += random.randint(-20, 20)
+            ball_x = max(50, min(1870, ball_x))
+            ball_y = max(50, min(1030, ball_y))
+            ball_size = random.randint(10, 20)
+            ball_dict[1] = {
+                "bbox": [
+                    float(ball_x - ball_size),
+                    float(ball_y - ball_size),
+                    float(ball_x + ball_size),
+                    float(ball_y + ball_size),
+                ]
+            }
+
+        tracks["players"].append(players_dict)
+        tracks["referees"].append(referees_dict)
+        tracks["ball"].append(ball_dict)
+
+    return tracks
+
+
 # ---------------------------------------------------------------------------
 # CLI entry point
 # ---------------------------------------------------------------------------
